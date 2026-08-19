@@ -1,10 +1,10 @@
 {
-  "name": "plugin-template",
+  "name": "plugin-helm",
   "build": {
     "context": ".",
     "dockerfile": "Dockerfile"
   },
-  "workspaceFolder": "/workspaces/plugin-template",
+  "workspaceFolder": "/workspaces/plugin-helm",
   "forwardPorts": [8080],
   "customizations": {
     "vscode": {
