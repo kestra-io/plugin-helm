@@ -1,8 +1,8 @@
 group: io.kestra.plugin.helm
 name: "helm"
 title: "Helm"
-description: "Helm plugin for Kestra"
-body: ""
+description: "Deploy and manage Kubernetes applications from Helm charts."
+body: "Wraps the Helm CLI as orchestrated tasks — upgrade, uninstall, rollback, status and template — so a Kubernetes deployment becomes one step in a broader workflow, and each deployed release is registered as a queryable, lineage-tracked Asset."
 videos: []
 createdBy: "Kestra Core Team"
 managedBy: "Kestra Core Team"
