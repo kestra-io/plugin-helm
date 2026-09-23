@@ -1,5 +1,3 @@
-version: "3.8"
-
 services:
   app:
     build:
@@ -8,8 +6,25 @@ services:
     command: server local
     ports:
       - "8080:8080"
+    user: root
     volumes:
       - ./build/libs/:/app/plugins/
+      # The Helm tasks run the CLI through the Docker task runner, so Kestra needs a Docker
+      # daemon to start containers with. Those containers are siblings created by the host
+      # daemon, so the working directory must resolve to the same path on both sides for
+      # the chart, values, and kubeconfig files to be visible inside them.
+      - /var/run/docker.sock:/var/run/docker.sock
+      - /tmp/kestra-wd:/tmp/kestra-wd
+    environment:
+      KESTRA_CONFIGURATION: |
+        kestra:
+          server:
+            basic-auth:
+              username: admin@kestra.io
+              password: DevPassword123!
+          tasks:
+            tmp-dir:
+              path: /tmp/kestra-wd/tmp
     # works around "Unable to create JFR repository directory using base
     # location (/tmp)" on some hosts, see kestra-io/kestra#17405
     tmpfs:

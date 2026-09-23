@@ -49,6 +49,9 @@ dependencies {
     annotationProcessor group: "io.kestra", name: "processor", version: kestraVersion
     compileOnly group: "io.kestra", name: "core", version: kestraVersion
     compileOnly group: "io.kestra", name: "script", version: kestraVersion
+
+    // Kubernetes auth model, shared with plugin-kubernetes rather than reinvented
+    api "io.kestra.plugin:plugin-kubernetes-lib:1.0.2"
 }
 
 
@@ -82,6 +85,8 @@ dependencies {
     testImplementation group: "io.kestra", name: "repository-memory", version: kestraVersion
     testImplementation group: "io.kestra", name: "runner-memory", version: kestraVersion
     testImplementation group: "io.kestra", name: "storage-local", version: kestraVersion
+
+    testImplementation "io.kestra.plugin:plugin-kubernetes-lib:1.0.2"
 
     // test
     testImplementation "org.junit.jupiter:junit-jupiter-engine"
