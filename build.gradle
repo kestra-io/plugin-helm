@@ -87,6 +87,7 @@ dependencies {
     testImplementation group: "io.kestra", name: "storage-local", version: kestraVersion
 
     testImplementation "io.kestra.plugin:plugin-kubernetes-lib:1.1.3"
+    testImplementation "io.fabric8:kubernetes-server-mock:7.9.0"
 
     // test
     testImplementation "org.junit.jupiter:junit-jupiter-engine"

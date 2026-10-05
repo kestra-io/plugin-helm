@@ -4,6 +4,7 @@
 
 - Provides plugin components under `io.kestra.plugin.helm`.
 - Wraps the `helm` CLI as orchestrated tasks: `Upgrade`, `Uninstall`, `Rollback`, `Status`, `Template`.
+- Provides `ReleaseTrigger`, which starts a flow when a release reaches a new revision or status.
 
 ## Why
 
@@ -17,11 +18,11 @@
 
 Single-module plugin. Source packages under `io.kestra.plugin`:
 
-- `helm` — the five tasks plus the `AbstractHelm` / `AbstractHelmRelease` bases
-- `helm.models` — chart sourcing, release parsing, task outputs, flag enums
-- `helm.services` — manifest parsing, kubeconfig rendering, Asset emission
+- `helm` — the five tasks and the trigger, plus the `AbstractHelm` / `AbstractHelmRelease` / `AbstractHelmPollingTrigger` bases
+- `helm.models` — chart sourcing, release parsing, task outputs, flag and status enums
+- `helm.services` — manifest parsing, kubeconfig rendering, Asset emission, release Secret decoding
 
-`AbstractHelm` holds container execution (task runner, image, env, command assembly). `AbstractHelmRelease` adds the cluster connection, release identity, and Asset emission. `Template` extends `AbstractHelm` directly because it never contacts a cluster and emits no Assets.
+`AbstractHelm` holds container execution (task runner, image, env, command assembly). `AbstractHelmRelease` adds the cluster connection, release identity, and Asset emission. `Template` extends `AbstractHelm` directly because it never contacts a cluster and emits no Assets. `AbstractHelmPollingTrigger` repeats the connection fields for triggers, which cannot extend a `Task`, and builds a fabric8 client instead of a kubeconfig file.
 
 Infrastructure dependencies (Docker Compose services):
 
@@ -34,6 +35,7 @@ Infrastructure dependencies (Docker Compose services):
 - `io.kestra.plugin.helm.Rollback` — `helm rollback`
 - `io.kestra.plugin.helm.Status` — `helm status`, read-only
 - `io.kestra.plugin.helm.Template` — `helm template`, no cluster contact
+- `io.kestra.plugin.helm.ReleaseTrigger` — polls Helm's release Secrets, stateful via `StatefulTriggerService`
 
 ### Project Structure
 
@@ -55,6 +57,7 @@ plugin-helm/
 - Helm commands are assembled as shell strings, so every user-supplied value must go through `AbstractHelm.quote()`.
 - Command strings are wrapped in `Property.ofValue`, which carries an already-resolved value, so Pebble never evaluates them — use paths relative to the container working directory rather than `{{ workingDir }}` or `{{ outputFiles[...] }}` placeholders.
 - Tests that exercise a task runner must build their run context with `TestsUtils.mockRunContext`, not `runContextFactory.of()`; only the former initialises the context, and without it the Docker runner fails on a null `Optional`.
+- Triggers never run the `helm` CLI: a container per poll is too heavy. `ReleaseTrigger` lists the `sh.helm.release.v1.*` Secrets (`owner=helm`) through fabric8 and decodes them with `ReleaseStorageService`. Pick the latest revision per release before filtering by status — a failed revision keeps `status=failed` in history after a later one succeeds. Its tests run against fabric8's CRUD mock server (`@EnableKubernetesMockClient(crud = true)`), not kind.
 - Chart and values sourcing covers Helm repository, OCI registry, and local path. Git-sourced charts are handled by cloning with `io.kestra.plugin.git.Clone` inside a `WorkingDirectory`, not by a `git` block on the task.
 
 ## References

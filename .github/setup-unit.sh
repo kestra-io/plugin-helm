@@ -8,3 +8,7 @@ chmod +x ./kind
 # reachable once the Helm container joins kind's network, and that name is in the API server
 # certificate so TLS verification still applies.
 ./kind get kubeconfig --internal --name kestra-helm > /tmp/kestra-helm-kubeconfig.yaml
+
+# ReleaseTrigger runs in the test JVM on the host rather than in a container, so it needs the
+# host-facing kubeconfig.
+./kind get kubeconfig --name kestra-helm > /tmp/kestra-helm-host-kubeconfig.yaml

@@ -6,9 +6,11 @@ import java.nio.file.Path;
 import java.util.ArrayList;
 import java.util.List;
 import java.util.Map;
+import java.util.Optional;
 import java.util.concurrent.TimeUnit;
 
 import io.kestra.core.junit.annotations.KestraTest;
+import io.kestra.core.models.executions.Execution;
 import io.kestra.core.models.property.Property;
 import io.kestra.core.models.tasks.Task;
 import io.kestra.core.runners.RunContext;
@@ -18,6 +20,7 @@ import io.kestra.core.utils.TestsUtils;
 import io.kestra.plugin.helm.models.ChartSource;
 import io.kestra.plugin.helm.models.DryRunMode;
 import io.kestra.plugin.helm.models.ReleaseResource;
+import io.kestra.plugin.helm.models.ReleaseStatus;
 import io.kestra.plugin.helm.models.WaitStrategy;
 import io.kestra.plugin.scripts.runner.docker.Docker;
 
@@ -31,6 +34,7 @@ import static org.hamcrest.Matchers.contains;
 import static org.hamcrest.Matchers.hasSize;
 import static org.hamcrest.Matchers.is;
 import static org.hamcrest.Matchers.notNullValue;
+import static org.junit.jupiter.api.Assertions.assertThrows;
 import static org.junit.jupiter.api.Assumptions.assumeTrue;
 
 /**
@@ -40,6 +44,7 @@ import static org.junit.jupiter.api.Assumptions.assumeTrue;
 @Timeout(value = 15, unit = TimeUnit.MINUTES)
 class HelmLifecycleTest {
     private static final Path KUBECONFIG = Path.of("/tmp/kestra-helm-kubeconfig.yaml");
+    private static final Path HOST_KUBECONFIG = Path.of("/tmp/kestra-helm-host-kubeconfig.yaml");
     private static final String NAMESPACE = "helm-it";
 
     private static final String CHART_YAML = """
@@ -57,6 +62,15 @@ class HelmLifecycleTest {
           name: {{ .Release.Name }}-config
         data:
           message: {{ .Values.message | default "default-message" | quote }}
+        """;
+
+    private static final String BROKEN_TEMPLATE = """
+        {{- if .Values.broken }}
+        apiVersion: v1
+        kind: ConfigMap
+        metadata:
+          name: Not_A_Valid_Name
+        {{- end }}
         """;
 
     @Inject
@@ -81,6 +95,7 @@ class HelmLifecycleTest {
         RunContext runContext = runContextFor(task);
         runContext.workingDir().createFile("hello/Chart.yaml", CHART_YAML.getBytes(StandardCharsets.UTF_8));
         runContext.workingDir().createFile("hello/templates/configmap.yaml", CONFIGMAP_TEMPLATE.getBytes(StandardCharsets.UTF_8));
+        runContext.workingDir().createFile("hello/templates/broken.yaml", BROKEN_TEMPLATE.getBytes(StandardCharsets.UTF_8));
 
         return runContext;
     }
@@ -304,5 +319,113 @@ class HelmLifecycleTest {
             .taskRunner(taskRunner())
             .build();
         cleanup.run(runContextFor(cleanup));
+    }
+
+    @Test
+    void shouldTriggerOnRealReleaseTransitions() throws Exception {
+        assumeTrue(
+            Files.exists(HOST_KUBECONFIG),
+            "No host kubeconfig at " + HOST_KUBECONFIG + "; run .github/setup-unit.sh first"
+        );
+
+        String release = "tr-" + IdUtils.create().toLowerCase();
+
+        Upgrade install = Upgrade.builder()
+            .id(IdUtils.create())
+            .type(Upgrade.class.getName())
+            .releaseName(Property.ofValue(release))
+            .namespace(Property.ofValue(NAMESPACE))
+            .createNamespace(Property.ofValue(true))
+            .wait(Property.ofValue(WaitStrategy.WATCHER))
+            .chart(ChartSource.builder().path(Property.ofValue("hello")).build())
+            .kubeconfig(Property.ofValue(kubeconfig()))
+            .taskRunner(taskRunner())
+            .build();
+        install.run(runContextWithChart(install));
+
+        ReleaseTrigger trigger = releaseTrigger(release).build();
+        var context = TestsUtils.mockTrigger(runContextFactory, trigger);
+
+        Map<String, Object> installed = onlyRelease(trigger.evaluate(context.getKey(), context.getValue()));
+        assertThat(installed.get("revision"), is(1));
+        assertThat(installed.get("status"), is("deployed"));
+        assertThat(installed.get("chart"), is("hello"));
+        assertThat(installed.get("chartVersion"), is("0.1.0"));
+        assertThat(installed.get("appVersion"), is("1.0.0"));
+        assertThat(installed.get("cluster"), is("kind-it"));
+
+        assertThat(trigger.evaluate(context.getKey(), context.getValue()).isEmpty(), is(true));
+
+        Upgrade broken = Upgrade.builder()
+            .id(IdUtils.create())
+            .type(Upgrade.class.getName())
+            .releaseName(Property.ofValue(release))
+            .namespace(Property.ofValue(NAMESPACE))
+            .chart(ChartSource.builder().path(Property.ofValue("hello")).build())
+            .values(Property.ofValue(Map.of("broken", true)))
+            .kubeconfig(Property.ofValue(kubeconfig()))
+            .taskRunner(taskRunner())
+            .build();
+        assertThrows(Exception.class, () -> broken.run(runContextWithChart(broken)));
+
+        Map<String, Object> failed = onlyRelease(trigger.evaluate(context.getKey(), context.getValue()));
+        assertThat(failed.get("revision"), is(2));
+        assertThat(failed.get("status"), is("failed"));
+        assertThat(failed.get("previousStatus"), is("deployed"));
+        assertThat(failed.get("description"), is(notNullValue()));
+
+        Rollback rollback = Rollback.builder()
+            .id(IdUtils.create())
+            .type(Rollback.class.getName())
+            .releaseName(Property.ofValue(release))
+            .namespace(Property.ofValue(NAMESPACE))
+            .revision(Property.ofValue(1))
+            .wait(Property.ofValue(WaitStrategy.WATCHER))
+            .kubeconfig(Property.ofValue(kubeconfig()))
+            .taskRunner(taskRunner())
+            .build();
+        rollback.run(runContextFor(rollback));
+
+        Map<String, Object> recovered = onlyRelease(trigger.evaluate(context.getKey(), context.getValue()));
+        assertThat(recovered.get("revision"), is(3));
+        assertThat(recovered.get("status"), is("deployed"));
+        assertThat(recovered.get("previousStatus"), is("failed"));
+
+        // Revision 2 is still `failed` in the release history, but it is no longer the latest.
+        ReleaseTrigger failedOnly = releaseTrigger(release)
+            .statuses(Property.ofValue(List.of(ReleaseStatus.FAILED)))
+            .build();
+        var failedOnlyContext = TestsUtils.mockTrigger(runContextFactory, failedOnly);
+        assertThat(failedOnly.evaluate(failedOnlyContext.getKey(), failedOnlyContext.getValue()).isEmpty(), is(true));
+
+        Uninstall cleanup = Uninstall.builder()
+            .id(IdUtils.create())
+            .type(Uninstall.class.getName())
+            .releaseName(Property.ofValue(release))
+            .namespace(Property.ofValue(NAMESPACE))
+            .kubeconfig(Property.ofValue(kubeconfig()))
+            .taskRunner(taskRunner())
+            .build();
+        cleanup.run(runContextFor(cleanup));
+    }
+
+    private static ReleaseTrigger.ReleaseTriggerBuilder<?, ?> releaseTrigger(String release) throws Exception {
+        return ReleaseTrigger.builder()
+            .id("release-" + IdUtils.create())
+            .type(ReleaseTrigger.class.getName())
+            .namespace(Property.ofValue(NAMESPACE))
+            .releaseName(Property.ofValue(release))
+            .cluster(Property.ofValue("kind-it"))
+            .kubeconfig(Property.ofValue(Files.readString(HOST_KUBECONFIG)));
+    }
+
+    @SuppressWarnings("unchecked")
+    private static Map<String, Object> onlyRelease(Optional<Execution> execution) {
+        assertThat(execution.isPresent(), is(true));
+
+        List<Map<String, Object>> releases = (List<Map<String, Object>>) execution.get().getTrigger().getVariables().get("releases");
+        assertThat(releases, hasSize(1));
+
+        return releases.getFirst();
     }
 }

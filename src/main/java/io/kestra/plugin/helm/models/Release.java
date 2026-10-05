@@ -49,6 +49,10 @@ public record Release(
         return info == null ? null : info.notes();
     }
 
+    public String description() {
+        return info == null ? null : info.description();
+    }
+
     public String firstDeployed() {
         return info == null ? null : info.firstDeployed();
     }

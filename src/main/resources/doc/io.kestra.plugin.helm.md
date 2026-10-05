@@ -6,6 +6,9 @@ than an opaque shell-out. On the Enterprise Edition each deployed release and th
 resources it manages are also registered as Assets, turning a fire-and-forget `helm upgrade` into
 a queryable deployment record.
 
+A `ReleaseTrigger` closes the loop the other way: it watches releases on a cluster and starts a flow
+when one fails, gets stuck, or reaches a new revision, whoever made the change.
+
 ## Tasks
 
 | Task | Purpose |
@@ -15,6 +18,12 @@ a queryable deployment record.
 | `Rollback` | Reverts a release to an earlier revision |
 | `Status` | Reads current release state without changing anything |
 | `Template` | Renders a chart to manifests for review or diffing; never contacts the cluster |
+
+## Triggers
+
+| Trigger | Purpose |
+|---|---|
+| `ReleaseTrigger` | Starts a flow when a release reaches a new revision or status |
 
 ## Requirements
 
@@ -206,6 +215,72 @@ Assets are an Enterprise Edition feature. On the open-source edition the tasks r
 emission is skipped. Asset emission failures never fail an otherwise successful deploy; set
 `assetFailureBehavior: FAIL` to change that.
 
+## Reacting to release changes
+
+`ReleaseTrigger` polls the releases on a cluster and starts a flow when one changes, whether the
+change came from a Kestra task, a CI pipeline, or someone running `helm` by hand. Typical uses are
+alerting on a failed deploy, rolling back a release stuck in `pending-upgrade`, and smoke-testing
+every new revision:
+
+```yaml
+triggers:
+  - id: failed_release
+    type: io.kestra.plugin.helm.ReleaseTrigger
+    namespace: web
+    statuses:
+      - FAILED
+    cluster: prod-eu
+    kubeconfig: "{{ secret('PROD_EU_KUBECONFIG') }}"
+```
+
+The matching releases are in `trigger.releases`, each with `releaseName`, `namespace`, `cluster`,
+`revision`, `status`, `previousStatus`, `chart`, `chartVersion`, `appVersion`, `description`,
+`firstDeployed`, and `lastDeployed`. Loop over them with `ForEach`, which hands each one to its
+child tasks as a JSON string, so read fields with `fromJson(taskrun.value).releaseName`. Release
+values are never included, since they often hold credentials.
+
+**No Helm container runs.** Unlike the tasks, the trigger reads Helm's release records straight
+from the Kubernetes API, so the Kestra worker needs network access to the cluster but no container
+runtime. It accepts the same `connection`, `kubeconfig`, and `kubeContext` properties as the tasks.
+
+**What fires.** Only the latest revision of each release is considered, so a revision that failed
+and has since been replaced by a good one does not fire. With the default `on: CREATE_OR_UPDATE`, a
+release fires once when the trigger first sees it, then again each time its revision or status
+changes; `statuses` narrows which of those fire. The first poll therefore fires for every release
+already on the cluster — set `on: UPDATE` to react only to changes made after the trigger starts.
+
+**Stuck releases.** An interrupted deploy leaves a release in `pending-install`, `pending-upgrade`,
+or `pending-rollback`, and Helm then refuses every later operation on it. `stuckFor` holds a pending
+release back until it has been pending for that long, so a deploy that is simply still running does
+not fire:
+
+```yaml
+statuses:
+  - PENDING_UPGRADE
+stuckFor: PT15M
+```
+
+**Permissions.** Helm stores each release revision as a Secret, so the trigger needs `list` on
+`secrets`:
+
+```yaml
+apiVersion: rbac.authorization.k8s.io/v1
+kind: Role
+metadata:
+  name: kestra-helm-release-reader
+  namespace: web
+rules:
+  - apiGroups: [""]
+    resources: ["secrets"]
+    verbs: ["list"]
+```
+
+`allNamespaces: true` needs the same rule in a `ClusterRole`. Kubernetes RBAC cannot narrow this
+permission to Helm's own Secrets, so prefer a Role scoped to the namespaces you watch.
+
+Only releases kept with Helm's default `secret` storage driver are seen; releases stored with
+`HELM_DRIVER=configmap` or `sql` are not.
+
 ## Passing a chart inline with `inputFiles`
 
 Chart templates use Go templating, which collides with Kestra's own `{{ }}` expressions. Wrap the
@@ -232,6 +307,10 @@ plugin reads the result back, so a failure during that read leaves the deploy in
 address of `127.0.0.1` refers to that container rather than your host. Use an address reachable
 from inside it, and where the cluster runs in Docker, put the container on the same network with
 the task runner's `networkMode`.
+
+**`ReleaseTrigger` never fires.** Check the trigger's logs for an RBAC error: without `list` on
+`secrets` in the watched namespace the poll fails rather than reporting no releases. If the
+releases were installed with `HELM_DRIVER=configmap`, the trigger cannot see them.
 
 **No Assets show up on the Enterprise Edition even though the task succeeded.** Add
 `assets: { enableAuto: true }` to the task — see [Assets](#assets) above.
