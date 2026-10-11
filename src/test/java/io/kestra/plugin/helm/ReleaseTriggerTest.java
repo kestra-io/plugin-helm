@@ -269,4 +269,65 @@ class ReleaseTriggerTest {
         assertThat(e.getMessage(), containsString("users[u].user.exec"));
         assertThat(Files.exists(marker), is(false));
     }
+
+    private void uninstall(String namespace, String name) {
+        client.secrets().inNamespace(namespace).withLabel("name", name).delete();
+        client.secrets().inNamespace(namespace).withLabel("name", name)
+            .waitUntilCondition(secret -> secret == null, 10, java.util.concurrent.TimeUnit.SECONDS);
+    }
+
+    @Test
+    void shouldFireAgainWhenAReleaseIsUninstalledAndReinstalledBetweenPolls() throws Exception {
+        String ns = namespace();
+        apply(ReleaseSecrets.release(ns, "api", 1, "failed"));
+
+        ReleaseTrigger trigger = trigger(ns).statuses(Property.ofValue(List.of(ReleaseStatus.FAILED))).build();
+        var context = TestsUtils.mockTrigger(runContextFactory, trigger);
+
+        assertThat(evaluate(trigger, context).isPresent(), is(true));
+
+        uninstall(ns, "api");
+        apply(ReleaseSecrets.release(ns, "api", 1, "failed"));
+
+        Optional<Execution> execution = evaluate(trigger, context);
+        assertThat(execution.isPresent(), is(true));
+        assertThat(releases(execution.get()).getFirst().get("revision"), is(1));
+    }
+
+    @Test
+    void shouldForgetAnUninstalledReleaseAndFireAsNewWhenItReturns() throws Exception {
+        String ns = namespace();
+        apply(ReleaseSecrets.release(ns, "api", 1, "deployed"));
+
+        ReleaseTrigger trigger = trigger(ns).build();
+        var context = TestsUtils.mockTrigger(runContextFactory, trigger);
+
+        assertThat(evaluate(trigger, context).isPresent(), is(true));
+
+        uninstall(ns, "api");
+        assertThat(evaluate(trigger, context).isEmpty(), is(true));
+
+        apply(ReleaseSecrets.release(ns, "api", 1, "deployed"));
+
+        Optional<Execution> execution = evaluate(trigger, context);
+        assertThat(execution.isPresent(), is(true));
+        assertThat(releases(execution.get()).getFirst().get("previousStatus"), is(nullValue()));
+    }
+
+    @Test
+    void shouldNotForgetAnUntouchedReleaseThatIsStillListed() throws Exception {
+        String ns = namespace();
+        apply(ReleaseSecrets.release(ns, "nginx", 1, "deployed"));
+
+        ReleaseTrigger trigger = trigger(ns).stateTtl(Property.ofValue(Duration.ofSeconds(2))).build();
+        var context = TestsUtils.mockTrigger(runContextFactory, trigger);
+
+        assertThat(evaluate(trigger, context).isPresent(), is(true));
+
+        Thread.sleep(1200);
+        assertThat(evaluate(trigger, context).isEmpty(), is(true));
+
+        Thread.sleep(1200);
+        assertThat(evaluate(trigger, context).isEmpty(), is(true));
+    }
 }

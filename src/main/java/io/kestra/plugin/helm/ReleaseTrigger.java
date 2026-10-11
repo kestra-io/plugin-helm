@@ -3,10 +3,12 @@ package io.kestra.plugin.helm;
 import java.time.Duration;
 import java.time.Instant;
 import java.util.ArrayList;
+import java.util.HashSet;
 import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
 import java.util.Optional;
+import java.util.Set;
 import java.util.regex.Pattern;
 
 import io.fabric8.kubernetes.api.model.Secret;
@@ -215,7 +217,7 @@ public class ReleaseTrigger extends AbstractHelmPollingTrigger implements Trigge
 
     @Schema(
         title = "State TTL",
-        description = "How long a release is remembered after it was last seen, e.g. `P30D`. A release that is forgotten fires again as new."
+        description = "How long a release is remembered without being listed by a poll, e.g. `P30D`. Releases that are no longer on the cluster are forgotten on the next poll regardless, so this only matters when the trigger stops polling for longer than the TTL: every release then fires again as new."
     )
     @PluginProperty(group = "advanced")
     private Property<Duration> stateTtl;
@@ -261,6 +263,7 @@ public class ReleaseTrigger extends AbstractHelmPollingTrigger implements Trigge
 
         Instant now = Instant.now();
         List<ReleaseChange> changes = new ArrayList<>();
+        Set<String> listed = new HashSet<>();
 
         for (Secret secret : ReleaseStorageService.latestRevisions(secrets)) {
             String name = ReleaseStorageService.releaseName(secret);
@@ -268,32 +271,42 @@ public class ReleaseTrigger extends AbstractHelmPollingTrigger implements Trigge
                 continue;
             }
 
+            String releaseNamespace = secret.getMetadata().getNamespace();
+            String uri = releaseNamespace + "/" + name;
+            listed.add(uri);
+
+            StatefulTriggerService.Entry previous = state.get(uri);
             ReleaseStatus status = ReleaseStatus.fromHelm(ReleaseStorageService.status(secret));
             Instant changedAt = ReleaseStorageService.changedAt(secret);
 
             // Left out of the state until stuck, so the release still counts as changed once it is.
             if (rStuckFor != null && status.isPending() && changedAt != null && changedAt.plus(rStuckFor).isAfter(now)) {
+                if (previous != null) {
+                    state.put(uri, seen(previous, now));
+                }
                 continue;
             }
 
-            String releaseNamespace = secret.getMetadata().getNamespace();
             Integer revision = ReleaseStorageService.revision(secret);
-            String uri = releaseNamespace + "/" + name;
 
-            StatefulTriggerService.Entry previous = state.get(uri);
+            // The Secret's uid tells a reinstall, which restarts at revision 1, apart from the original install.
             StatefulTriggerService.Entry candidate = StatefulTriggerService.Entry.candidate(
                 uri,
-                revision + ":" + status.helmValue(),
+                String.join(":", String.valueOf(revision), status.helmValue(), String.valueOf(secret.getMetadata().getUid())),
                 changedAt != null ? changedAt : now
             );
 
             boolean fire = computeAndUpdateState(state, candidate, rOn).fire();
+
+            // Core only refreshes lastSeenAt on change, which would let stateTtl forget an untouched release.
+            state.put(uri, seen(state.get(uri), now));
 
             if (fire && (rStatuses.isEmpty() || rStatuses.contains(status))) {
                 changes.add(change(runContext, secret, rCluster, releaseNamespace, name, revision, status, previous));
             }
         }
 
+        state.keySet().retainAll(listed);
         writeState(runContext, rStateKey, state, rStateTtl);
 
         if (changes.isEmpty()) {
@@ -352,9 +365,13 @@ public class ReleaseTrigger extends AbstractHelmPollingTrigger implements Trigge
             .build();
     }
 
+    private static StatefulTriggerService.Entry seen(StatefulTriggerService.Entry entry, Instant now) {
+        return new StatefulTriggerService.Entry(entry.uri(), entry.version(), entry.modifiedAt(), now);
+    }
+
     private static String previousStatus(String version) {
-        int separator = version == null ? -1 : version.indexOf(':');
-        return separator < 0 ? null : version.substring(separator + 1);
+        String[] parts = version == null ? new String[0] : version.split(":");
+        return parts.length < 2 ? null : parts[1];
     }
 
     @Builder

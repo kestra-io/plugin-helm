@@ -252,6 +252,8 @@ and has since been replaced by a good one does not fire. With the default `on: C
 release fires once when the trigger first sees it, then again each time its revision or status
 changes; `statuses` narrows which of those fire. The first poll therefore fires for every release
 already on the cluster — set `on: UPDATE` to react only to changes made after the trigger starts.
+A release that is uninstalled and installed again counts as a new release, even though Helm restarts
+it at revision 1.
 
 **Stuck releases.** An interrupted deploy leaves a release in `pending-install`, `pending-upgrade`,
 or `pending-rollback`, and Helm then refuses every later operation on it. `stuckFor` holds a pending
