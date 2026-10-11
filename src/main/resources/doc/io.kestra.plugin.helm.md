@@ -241,7 +241,11 @@ values are never included, since they often hold credentials.
 
 **No Helm container runs.** Unlike the tasks, the trigger reads Helm's release records straight
 from the Kubernetes API, so the Kestra worker needs network access to the cluster but no container
-runtime. It accepts the same `connection`, `kubeconfig`, and `kubeContext` properties as the tasks.
+runtime. It accepts the same `connection`, `kubeconfig`, and `kubeContext` properties as the tasks,
+with one difference: because a raw `kubeconfig` is loaded on the worker rather than in a container,
+it must carry its credentials inline. `exec` and `auth-provider` plugins and file paths
+(`tokenFile`, `client-certificate`, `client-key`, `certificate-authority`) are rejected. For EKS,
+GKE, or other short-lived cloud credentials, use `connection` with an `oauthTokenProvider`.
 
 **What fires.** Only the latest revision of each release is considered, so a revision that failed
 and has since been replaced by a good one does not fire. With the default `on: CREATE_OR_UPDATE`, a

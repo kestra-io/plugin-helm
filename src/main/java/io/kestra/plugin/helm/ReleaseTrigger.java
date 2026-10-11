@@ -28,6 +28,7 @@ import io.kestra.core.runners.RunContext;
 import io.kestra.plugin.helm.models.Release;
 import io.kestra.plugin.helm.models.ReleaseOutput;
 import io.kestra.plugin.helm.models.ReleaseStatus;
+import io.kestra.plugin.helm.services.KubeConfigService;
 import io.kestra.plugin.helm.services.ReleaseStorageService;
 import io.kestra.plugin.kubernetes.shared.services.ClientService;
 
@@ -236,8 +237,9 @@ public class ReleaseTrigger extends AbstractHelmPollingTrigger implements Trigge
         }
         Pattern namePattern = rReleaseNamePattern == null ? null : Pattern.compile(rReleaseNamePattern);
 
-        Config config = kubernetesConfig(runContext);
-        String rCluster = resolveCluster(runContext, config);
+        KubeConfigService.ClusterAccess access = clusterAccess(runContext);
+        Config config = kubernetesConfig(runContext, access);
+        String rCluster = access.cluster();
 
         Map<String, String> selector = new LinkedHashMap<>();
         selector.put(ReleaseStorageService.OWNER_LABEL, ReleaseStorageService.OWNER);
@@ -276,7 +278,7 @@ public class ReleaseTrigger extends AbstractHelmPollingTrigger implements Trigge
 
             String releaseNamespace = secret.getMetadata().getNamespace();
             Integer revision = ReleaseStorageService.revision(secret);
-            String uri = rCluster + "/" + releaseNamespace + "/" + name;
+            String uri = releaseNamespace + "/" + name;
 
             StatefulTriggerService.Entry previous = state.get(uri);
             StatefulTriggerService.Entry candidate = StatefulTriggerService.Entry.candidate(
@@ -376,7 +378,7 @@ public class ReleaseTrigger extends AbstractHelmPollingTrigger implements Trigge
 
         @Schema(
             title = "Cluster name",
-            description = "The `cluster` property, or the host of the Kubernetes API server when it is unset."
+            description = "The `cluster` property, or the host of the Kubernetes API server when `connection` is used. Null otherwise."
         )
         private final String cluster;
 

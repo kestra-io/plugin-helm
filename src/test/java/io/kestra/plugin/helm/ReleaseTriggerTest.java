@@ -1,5 +1,7 @@
 package io.kestra.plugin.helm;
 
+import java.nio.file.Files;
+import java.nio.file.Path;
 import java.time.Duration;
 import java.time.Instant;
 import java.util.List;
@@ -26,6 +28,7 @@ import org.junit.jupiter.api.Test;
 
 import static org.hamcrest.MatcherAssert.assertThat;
 import static org.hamcrest.Matchers.containsInAnyOrder;
+import static org.hamcrest.Matchers.containsString;
 import static org.hamcrest.Matchers.hasSize;
 import static org.hamcrest.Matchers.is;
 import static org.hamcrest.Matchers.nullValue;
@@ -218,5 +221,52 @@ class ReleaseTriggerTest {
             .connection(io.kestra.plugin.kubernetes.shared.models.Connection.builder().build())
             .build();
         assertThrows(IllegalArgumentException.class, () -> evaluate(connections, TestsUtils.mockTrigger(runContextFactory, connections)));
+    }
+
+    @Test
+    void shouldReportNoClusterWhenItIsUnsetAndAKubeconfigIsUsed() throws Exception {
+        String ns = namespace();
+        apply(ReleaseSecrets.release(ns, "nginx", 1, "deployed"));
+
+        ReleaseTrigger trigger = trigger(ns).cluster(null).build();
+        Optional<Execution> execution = evaluate(trigger, TestsUtils.mockTrigger(runContextFactory, trigger));
+
+        assertThat(releases(execution.orElseThrow()).getFirst().get("cluster"), is(nullValue()));
+    }
+
+    @Test
+    void shouldRefuseAKubeconfigThatWouldRunACommandOnTheWorker() throws Exception {
+        Path marker = Files.createTempDirectory("helm-trigger").resolve("exec-ran");
+        String kubeconfig = """
+            apiVersion: v1
+            kind: Config
+            clusters:
+              - name: c
+                cluster:
+                  server: %s
+                  insecure-skip-tls-verify: true
+            users:
+              - name: u
+                user:
+                  exec:
+                    apiVersion: client.authentication.k8s.io/v1
+                    command: sh
+                    args: ["-c", "touch %s"]
+            contexts:
+              - name: ctx
+                context:
+                  cluster: c
+                  user: u
+            current-context: ctx
+            """.formatted(client.getConfiguration().getMasterUrl(), marker);
+
+        ReleaseTrigger trigger = trigger(namespace()).kubeconfig(Property.ofValue(kubeconfig)).build();
+
+        IllegalArgumentException e = assertThrows(
+            IllegalArgumentException.class,
+            () -> evaluate(trigger, TestsUtils.mockTrigger(runContextFactory, trigger))
+        );
+        assertThat(e.getMessage(), containsString("users[u].user.exec"));
+        assertThat(Files.exists(marker), is(false));
     }
 }

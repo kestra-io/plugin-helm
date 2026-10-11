@@ -12,6 +12,7 @@ import org.junit.jupiter.api.Test;
 
 import static org.hamcrest.MatcherAssert.assertThat;
 import static org.hamcrest.Matchers.aMapWithSize;
+import static org.hamcrest.Matchers.containsString;
 import static org.hamcrest.Matchers.hasEntry;
 import static org.hamcrest.Matchers.hasKey;
 import static org.hamcrest.Matchers.is;
@@ -153,5 +154,58 @@ class KubeConfigServiceTest {
             KubeConfigService.clusterName(new ConfigBuilder(Config.empty()).withMasterUrl("https://kestra-helm-control-plane:6443").build()),
             is("kestra-helm-control-plane")
         );
+    }
+
+    private static String kubeconfig(String clusterFields, String userFields) {
+        return """
+            apiVersion: v1
+            kind: Config
+            clusters:
+              - name: c
+                cluster:
+                  server: https://cluster.example.com:6443
+            %s
+            users:
+              - name: u
+                user:
+            %s
+            contexts:
+              - name: ctx
+                context:
+                  cluster: c
+                  user: u
+            current-context: ctx
+            """.formatted(clusterFields.indent(6).stripTrailing(), userFields.indent(6).stripTrailing());
+    }
+
+    @Test
+    void shouldAcceptInlineCredentials() {
+        KubeConfigService.requireInlineCredentials(kubeconfig(
+            "certificate-authority-data: " + BASE64,
+            "token: a-token\nclient-certificate-data: " + BASE64 + "\nclient-key-data: " + BASE64
+        ));
+    }
+
+    @Test
+    void shouldRejectCredentialsThatRunACommandOrReadAFile() {
+        for (String user : List.of(
+            "exec:\n  apiVersion: client.authentication.k8s.io/v1\n  command: aws\n  args: [eks, get-token]",
+            "auth-provider:\n  name: gcp",
+            "tokenFile: /var/run/secrets/kubernetes.io/serviceaccount/token",
+            "client-certificate: /etc/client.crt",
+            "client-key: /etc/client.key"
+        )) {
+            IllegalArgumentException e = assertThrows(
+                IllegalArgumentException.class,
+                () -> KubeConfigService.requireInlineCredentials(kubeconfig("", user))
+            );
+            assertThat(e.getMessage(), containsString("users[u].user."));
+        }
+
+        IllegalArgumentException e = assertThrows(
+            IllegalArgumentException.class,
+            () -> KubeConfigService.requireInlineCredentials(kubeconfig("certificate-authority: /etc/ca.crt", "token: a-token"))
+        );
+        assertThat(e.getMessage(), containsString("clusters[c].cluster.certificate-authority"));
     }
 }

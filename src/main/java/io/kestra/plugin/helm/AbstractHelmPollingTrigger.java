@@ -45,7 +45,7 @@ public abstract class AbstractHelmPollingTrigger extends AbstractTrigger impleme
 
     @Schema(
         title = "Raw kubeconfig content",
-        description = "A complete kubeconfig, used verbatim. Mutually exclusive with `connection`. Supply through `{{ secret('...') }}` rather than inline."
+        description = "A complete kubeconfig. Mutually exclusive with `connection`. Supply through `{{ secret('...') }}` rather than inline.\n\nUnlike the tasks, which hand the kubeconfig to `helm` inside a container, the trigger loads it on the Kestra worker, so it must carry its credentials inline: `exec`, `auth-provider`, `tokenFile`, `client-certificate`, `client-key`, and `certificate-authority` are rejected. Use the `*-data` fields and a `token`, or `connection` with an `oauthTokenProvider` for short-lived cloud credentials such as EKS or GKE."
     )
     @PluginProperty(secret = true, group = "connection")
     @ToString.Exclude
@@ -60,7 +60,7 @@ public abstract class AbstractHelmPollingTrigger extends AbstractTrigger impleme
 
     @Schema(
         title = "Cluster name",
-        description = "Reported as `cluster` on each release in the trigger output, and part of the key that tells releases apart in the trigger state. Defaults to the host of the Kubernetes API server. Set it explicitly to match the name your team uses, e.g. `prod-eu`."
+        description = "Reported as `cluster` on each release in the trigger output, resolved the same way as on the tasks so the two can be joined. Defaults to the host of the Kubernetes API server when `connection` is used, and is null otherwise. Set it explicitly to match the name your team uses, e.g. `prod-eu`."
     )
     @PluginProperty(group = "advanced")
     protected Property<String> cluster;
@@ -73,31 +73,23 @@ public abstract class AbstractHelmPollingTrigger extends AbstractTrigger impleme
     @PluginProperty(group = "execution")
     private final Duration interval = Duration.ofMinutes(1);
 
-    protected Config kubernetesConfig(RunContext runContext) throws Exception {
-        String rKubeconfig = runContext.render(this.kubeconfig).as(String.class).orElse(null);
+    protected KubeConfigService.ClusterAccess clusterAccess(RunContext runContext) throws Exception {
+        return KubeConfigService.resolve(runContext, this.connection, this.inheritClusterConfig, this.kubeconfig, this.cluster);
+    }
+
+    protected Config kubernetesConfig(RunContext runContext, KubeConfigService.ClusterAccess access) throws Exception {
         String rKubeContext = runContext.render(this.kubeContext).as(String.class).orElse(null);
 
-        if (rKubeconfig != null && this.connection != null) {
-            throw new IllegalArgumentException("Set either `connection` or `kubeconfig`, not both.");
-        }
-
-        if (rKubeconfig != null) {
-            Path file = runContext.workingDir().createTempFile(rKubeconfig.getBytes(StandardCharsets.UTF_8), ".kubeconfig");
+        if (access.kubeconfig() != null) {
+            KubeConfigService.requireInlineCredentials(access.kubeconfig());
+            Path file = runContext.workingDir().createTempFile(access.kubeconfig().getBytes(StandardCharsets.UTF_8), ".kubeconfig");
             return Config.fromKubeconfig(rKubeContext, file.toFile());
         }
 
-        if (this.connection != null) {
-            return this.connection.toConfig(
-                runContext,
-                runContext.render(this.inheritClusterConfig).as(Boolean.class).orElse(false)
-            );
+        if (access.connectionConfig() != null) {
+            return access.connectionConfig();
         }
 
         return Config.autoConfigure(rKubeContext);
-    }
-
-    protected String resolveCluster(RunContext runContext, Config config) throws Exception {
-        return runContext.render(this.cluster).as(String.class)
-            .orElseGet(() -> KubeConfigService.clusterName(config));
     }
 }

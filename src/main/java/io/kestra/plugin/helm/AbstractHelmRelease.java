@@ -5,8 +5,6 @@ import java.nio.file.Files;
 import java.nio.file.Path;
 import java.util.List;
 
-import io.fabric8.kubernetes.client.Config;
-
 import io.kestra.core.models.annotations.PluginProperty;
 import io.kestra.core.models.property.Property;
 import io.kestra.core.runners.RunContext;
@@ -118,20 +116,12 @@ public abstract class AbstractHelmRelease extends AbstractHelm {
     protected Property<AssetFailureBehavior> assetFailureBehavior = Property.ofValue(AssetFailureBehavior.WARN);
 
     protected String kubeArgs(RunContext runContext) throws Exception {
-        String rKubeconfig = runContext.render(this.kubeconfig).as(String.class).orElse(null);
+        KubeConfigService.ClusterAccess access = clusterAccess(runContext);
 
-        if (rKubeconfig != null && this.connection != null) {
-            throw new IllegalArgumentException("Set either `connection` or `kubeconfig`, not both.");
-        }
-
-        String content = rKubeconfig;
-        if (content == null && this.connection != null) {
-            Config config = this.connection.toConfig(
-                runContext,
-                runContext.render(this.inheritClusterConfig).as(Boolean.class).orElse(false)
-            );
+        String content = access.kubeconfig();
+        if (content == null && access.connectionConfig() != null) {
             content = JacksonMapper.ofYaml().writeValueAsString(
-                KubeConfigService.toKubeConfig(config, runContext.render(this.namespace).as(String.class).orElse(null))
+                KubeConfigService.toKubeConfig(access.connectionConfig(), runContext.render(this.namespace).as(String.class).orElse(null))
             );
         }
 
@@ -154,21 +144,11 @@ public abstract class AbstractHelmRelease extends AbstractHelm {
     }
 
     protected String resolveCluster(RunContext runContext) throws Exception {
-        String explicit = runContext.render(this.cluster).as(String.class).orElse(null);
-        if (explicit != null) {
-            return explicit;
-        }
+        return clusterAccess(runContext).cluster();
+    }
 
-        if (this.connection == null) {
-            return null;
-        }
-
-        Config config = this.connection.toConfig(
-            runContext,
-            runContext.render(this.inheritClusterConfig).as(Boolean.class).orElse(false)
-        );
-
-        return KubeConfigService.clusterName(config);
+    private KubeConfigService.ClusterAccess clusterAccess(RunContext runContext) throws Exception {
+        return KubeConfigService.resolve(runContext, this.connection, this.inheritClusterConfig, this.kubeconfig, this.cluster);
     }
 
     protected void emitAssets(RunContext runContext, AssetService.Descriptor descriptor) throws Exception {
