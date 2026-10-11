@@ -4,13 +4,16 @@ import java.time.Duration;
 import java.time.Instant;
 import java.util.ArrayList;
 import java.util.HashSet;
-import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
 import java.util.Optional;
 import java.util.Set;
 import java.util.regex.Pattern;
 
+import io.fabric8.kubernetes.api.model.ListOptions;
+import io.fabric8.kubernetes.api.model.ListOptionsBuilder;
+import io.fabric8.kubernetes.api.model.PartialObjectMetadata;
+import io.fabric8.kubernetes.api.model.PartialObjectMetadataList;
 import io.fabric8.kubernetes.api.model.Secret;
 import io.fabric8.kubernetes.client.Config;
 import io.fabric8.kubernetes.client.KubernetesClient;
@@ -153,6 +156,8 @@ import static io.kestra.core.models.triggers.StatefulTriggerService.writeState;
     }
 )
 public class ReleaseTrigger extends AbstractHelmPollingTrigger implements TriggerOutput<ReleaseTrigger.Output>, StatefulTriggerInterface {
+    private static final long PAGE_SIZE = 500;
+
     @Schema(
         title = "Kubernetes namespace",
         description = "Namespace whose releases are watched. Ignored when `allNamespaces` is true."
@@ -243,18 +248,38 @@ public class ReleaseTrigger extends AbstractHelmPollingTrigger implements Trigge
         Config config = kubernetesConfig(runContext, access);
         String rCluster = access.cluster();
 
-        Map<String, String> selector = new LinkedHashMap<>();
-        selector.put(ReleaseStorageService.OWNER_LABEL, ReleaseStorageService.OWNER);
+        String selector = ReleaseStorageService.OWNER_LABEL + "=" + ReleaseStorageService.OWNER;
         if (rReleaseName != null) {
-            selector.put(ReleaseStorageService.NAME_LABEL, rReleaseName);
+            selector += "," + ReleaseStorageService.NAME_LABEL + "=" + rReleaseName;
         }
 
-        List<Secret> secrets;
         try (KubernetesClient client = ClientService.of(config)) {
-            secrets = rAllNamespaces
-                ? client.secrets().inAnyNamespace().withLabels(selector).list().getItems()
-                : client.secrets().inNamespace(rNamespace).withLabels(selector).list().getItems();
+            return evaluate(
+                conditionContext,
+                context,
+                client,
+                releaseRecords(client, rAllNamespaces, rNamespace, selector),
+                rCluster,
+                namePattern,
+                rStatuses,
+                rStuckFor,
+                rOn
+            );
         }
+    }
+
+    private Optional<Execution> evaluate(
+        ConditionContext conditionContext,
+        TriggerContext context,
+        KubernetesClient client,
+        List<PartialObjectMetadata> records,
+        String rCluster,
+        Pattern namePattern,
+        List<ReleaseStatus> rStatuses,
+        Duration rStuckFor,
+        On rOn
+    ) throws Exception {
+        RunContext runContext = conditionContext.getRunContext();
 
         String rStateKey = runContext.render(this.stateKey).as(String.class)
             .orElse(defaultKey(context.getNamespace(), context.getFlowId(), this.getId()));
@@ -265,7 +290,7 @@ public class ReleaseTrigger extends AbstractHelmPollingTrigger implements Trigge
         List<ReleaseChange> changes = new ArrayList<>();
         Set<String> listed = new HashSet<>();
 
-        for (Secret secret : ReleaseStorageService.latestRevisions(secrets)) {
+        for (PartialObjectMetadata secret : ReleaseStorageService.latestRevisions(records)) {
             String name = ReleaseStorageService.releaseName(secret);
             if (namePattern != null && !namePattern.matcher(name).matches()) {
                 continue;
@@ -302,7 +327,7 @@ public class ReleaseTrigger extends AbstractHelmPollingTrigger implements Trigge
             state.put(uri, seen(state.get(uri), now));
 
             if (fire && (rStatuses.isEmpty() || rStatuses.contains(status))) {
-                changes.add(change(runContext, secret, rCluster, releaseNamespace, name, revision, status, previous));
+                changes.add(change(runContext, client, secret, rCluster, releaseNamespace, name, revision, status, previous));
             }
         }
 
@@ -324,9 +349,32 @@ public class ReleaseTrigger extends AbstractHelmPollingTrigger implements Trigge
         return Optional.of(TriggerService.generateExecution(this, conditionContext, context, output));
     }
 
+    private static List<PartialObjectMetadata> releaseRecords(KubernetesClient client, boolean allNamespaces, String namespace, String selector) {
+        List<PartialObjectMetadata> records = new ArrayList<>();
+        String continueToken = null;
+
+        do {
+            ListOptions options = new ListOptionsBuilder()
+                .withLabelSelector(selector)
+                .withLimit(PAGE_SIZE)
+                .withContinue(continueToken)
+                .build();
+
+            PartialObjectMetadataList page = allNamespaces
+                ? client.secrets().inAnyNamespace().listAsPartialObjectMetadata(options)
+                : client.secrets().inNamespace(namespace).listAsPartialObjectMetadata(options);
+
+            records.addAll(page.getItems());
+            continueToken = page.getMetadata() == null ? null : page.getMetadata().getContinue();
+        } while (continueToken != null && !continueToken.isEmpty());
+
+        return records;
+    }
+
     private static ReleaseChange change(
         RunContext runContext,
-        Secret secret,
+        KubernetesClient client,
+        PartialObjectMetadata record,
         String cluster,
         String namespace,
         String name,
@@ -344,6 +392,10 @@ public class ReleaseTrigger extends AbstractHelmPollingTrigger implements Trigge
 
         Release release;
         try {
+            Secret secret = client.secrets().inNamespace(namespace).withName(record.getMetadata().getName()).get();
+            if (secret == null) {
+                throw new IllegalStateException("its release Secret was deleted after it was listed");
+            }
             release = ReleaseStorageService.decode(secret);
         } catch (Exception e) {
             runContext.logger().warn(

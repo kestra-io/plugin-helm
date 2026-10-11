@@ -15,6 +15,7 @@ import java.util.zip.GZIPInputStream;
 
 import com.fasterxml.jackson.databind.ObjectMapper;
 
+import io.fabric8.kubernetes.api.model.HasMetadata;
 import io.fabric8.kubernetes.api.model.Secret;
 
 import io.kestra.core.serializers.JacksonMapper;
@@ -37,10 +38,10 @@ public final class ReleaseStorageService {
     private ReleaseStorageService() {
     }
 
-    public static List<Secret> latestRevisions(Collection<Secret> secrets) {
-        Map<String, Secret> latest = new LinkedHashMap<>();
+    public static <T extends HasMetadata> List<T> latestRevisions(Collection<T> secrets) {
+        Map<String, T> latest = new LinkedHashMap<>();
 
-        for (Secret secret : secrets) {
+        for (T secret : secrets) {
             String name = label(secret, NAME_LABEL);
             if (name == null || revision(secret) == null) {
                 continue;
@@ -55,20 +56,20 @@ public final class ReleaseStorageService {
 
         return latest.values().stream()
             .sorted(Comparator
-                .comparing((Secret secret) -> secret.getMetadata().getNamespace())
+                .comparing((T secret) -> secret.getMetadata().getNamespace())
                 .thenComparing(secret -> label(secret, NAME_LABEL)))
             .toList();
     }
 
-    public static String releaseName(Secret secret) {
+    public static String releaseName(HasMetadata secret) {
         return label(secret, NAME_LABEL);
     }
 
-    public static String status(Secret secret) {
+    public static String status(HasMetadata secret) {
         return label(secret, STATUS_LABEL);
     }
 
-    public static Integer revision(Secret secret) {
+    public static Integer revision(HasMetadata secret) {
         String value = label(secret, VERSION_LABEL);
         if (value == null) {
             return null;
@@ -82,7 +83,7 @@ public final class ReleaseStorageService {
     }
 
     // A pending revision has no modifiedAt yet, so createdAt is when the stuck operation started.
-    public static Instant changedAt(Secret secret) {
+    public static Instant changedAt(HasMetadata secret) {
         Instant modified = epochSeconds(label(secret, MODIFIED_AT_LABEL));
         if (modified != null) {
             return modified;
@@ -141,7 +142,7 @@ public final class ReleaseStorageService {
         }
     }
 
-    private static String label(Secret secret, String key) {
+    private static String label(HasMetadata secret, String key) {
         Map<String, String> labels = secret.getMetadata().getLabels();
         return labels == null ? null : labels.get(key);
     }
