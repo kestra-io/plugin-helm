@@ -65,7 +65,7 @@ import static io.kestra.core.models.triggers.StatefulTriggerService.writeState;
 
         The first evaluation treats every release already on the cluster as new; set `on: UPDATE` to react only to changes made after the trigger starts.
 
-        Requires `list` permission on `secrets` in the watched namespaces, or cluster-wide with `allNamespaces`. Kubernetes RBAC cannot narrow that permission to Helm's Secrets, so prefer a namespace-scoped Role. Only releases stored with Helm's default `secret` storage driver are seen."""
+        Requires `list` and `get` permissions on `secrets` in the watched namespaces, or cluster-wide with `allNamespaces`. Kubernetes RBAC cannot narrow that permission to Helm's Secrets, so prefer a namespace-scoped Role. Without `get`, releases still fire but without chart details. Only releases stored with Helm's default `secret` storage driver are seen."""
 )
 @Plugin(
     examples = {
@@ -173,7 +173,7 @@ public class ReleaseTrigger extends AbstractHelmPollingTrigger implements Trigge
 
     @Schema(
         title = "Watch every namespace",
-        description = "Watches releases in all namespaces. Needs a ClusterRole that can list Secrets cluster-wide."
+        description = "Watches releases in all namespaces. Needs a ClusterRole that can list and get Secrets cluster-wide."
     )
     @Builder.Default
     @PluginProperty(group = "main")

@@ -267,7 +267,7 @@ stuckFor: PT15M
 ```
 
 **Permissions.** Helm stores each release revision as a Secret, so the trigger needs `list` on
-`secrets`:
+`secrets` to read their labels, and `get` to read a release's chart details when it fires:
 
 ```yaml
 apiVersion: rbac.authorization.k8s.io/v1
@@ -278,7 +278,7 @@ metadata:
 rules:
   - apiGroups: [""]
     resources: ["secrets"]
-    verbs: ["list"]
+    verbs: ["list", "get"]
 ```
 
 `allNamespaces: true` needs the same rule in a `ClusterRole`. Kubernetes RBAC cannot narrow this
@@ -316,7 +316,8 @@ the task runner's `networkMode`.
 
 **`ReleaseTrigger` never fires.** Check the trigger's logs for an RBAC error: without `list` on
 `secrets` in the watched namespace the poll fails rather than reporting no releases. If the
-releases were installed with `HELM_DRIVER=configmap`, the trigger cannot see them.
+releases were installed with `HELM_DRIVER=configmap`, the trigger cannot see them. If it fires
+without `chart`, `chartVersion`, or `description`, it is missing `get` on `secrets`.
 
 **No Assets show up on the Enterprise Edition even though the task succeeded.** Add
 `assets: { enableAuto: true }` to the task — see [Assets](#assets) above.
