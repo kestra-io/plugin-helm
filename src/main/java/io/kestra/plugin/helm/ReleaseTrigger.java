@@ -9,6 +9,7 @@ import java.util.Map;
 import java.util.Optional;
 import java.util.Set;
 import java.util.regex.Pattern;
+import java.util.regex.PatternSyntaxException;
 
 import io.fabric8.kubernetes.api.model.ListOptions;
 import io.fabric8.kubernetes.api.model.ListOptionsBuilder;
@@ -157,6 +158,10 @@ import static io.kestra.core.models.triggers.StatefulTriggerService.writeState;
 )
 public class ReleaseTrigger extends AbstractHelmPollingTrigger implements TriggerOutput<ReleaseTrigger.Output>, StatefulTriggerInterface {
     private static final long PAGE_SIZE = 500;
+    private static final int MAX_RELEASE_NAME_LENGTH = 53;
+    private static final Pattern RELEASE_NAME = Pattern.compile("[a-z0-9]([-a-z0-9.]*[a-z0-9])?");
+    private static final int MAX_PATTERN_LENGTH = 256;
+    private static final Pattern NESTED_QUANTIFIER = Pattern.compile("\\((?:[^()\\\\]|\\\\.)*[*+}](?:[^()\\\\]|\\\\.)*\\)[*+{]");
 
     @Schema(
         title = "Kubernetes namespace",
@@ -176,14 +181,14 @@ public class ReleaseTrigger extends AbstractHelmPollingTrigger implements Trigge
 
     @Schema(
         title = "Release name",
-        description = "Watches only the release with this exact name. Mutually exclusive with `releaseNamePattern`."
+        description = "Watches only the release with this exact name, which must be a valid Helm release name. Mutually exclusive with `releaseNamePattern`."
     )
     @PluginProperty(group = "main")
     private Property<String> releaseName;
 
     @Schema(
         title = "Release name pattern",
-        description = "Watches only releases whose name matches this regular expression in full. Mutually exclusive with `releaseName`."
+        description = "Watches only releases whose name matches this regular expression in full. Mutually exclusive with `releaseName`. At most 256 characters, and a repeated group must not itself contain a quantifier, such as `(a+)+`, since the pattern runs on every poll."
     )
     @PluginProperty(group = "main")
     private Property<String> releaseNamePattern;
@@ -242,7 +247,7 @@ public class ReleaseTrigger extends AbstractHelmPollingTrigger implements Trigge
         if (rReleaseName != null && rReleaseNamePattern != null) {
             throw new IllegalArgumentException("Set either `releaseName` or `releaseNamePattern`, not both.");
         }
-        Pattern namePattern = rReleaseNamePattern == null ? null : Pattern.compile(rReleaseNamePattern);
+        Pattern namePattern = rReleaseNamePattern == null ? null : namePattern(rReleaseNamePattern);
 
         KubeConfigService.ClusterAccess access = clusterAccess(runContext);
         Config config = kubernetesConfig(runContext, access);
@@ -250,6 +255,11 @@ public class ReleaseTrigger extends AbstractHelmPollingTrigger implements Trigge
 
         String selector = ReleaseStorageService.OWNER_LABEL + "=" + ReleaseStorageService.OWNER;
         if (rReleaseName != null) {
+            if (rReleaseName.length() > MAX_RELEASE_NAME_LENGTH || !RELEASE_NAME.matcher(rReleaseName).matches()) {
+                throw new IllegalArgumentException(
+                    "`releaseName` must be a valid Helm release name of at most " + MAX_RELEASE_NAME_LENGTH + " characters, matching " + RELEASE_NAME.pattern() + ": " + rReleaseName
+                );
+            }
             selector += "," + ReleaseStorageService.NAME_LABEL + "=" + rReleaseName;
         }
 
@@ -347,6 +357,22 @@ public class ReleaseTrigger extends AbstractHelmPollingTrigger implements Trigge
             .build();
 
         return Optional.of(TriggerService.generateExecution(this, conditionContext, context, output));
+    }
+
+    private static Pattern namePattern(String regex) {
+        if (regex.length() > MAX_PATTERN_LENGTH) {
+            throw new IllegalArgumentException("`releaseNamePattern` must be at most " + MAX_PATTERN_LENGTH + " characters.");
+        }
+        if (NESTED_QUANTIFIER.matcher(regex).find()) {
+            throw new IllegalArgumentException(
+                "`releaseNamePattern` must not repeat a group that itself contains a quantifier, such as `(a+)+`, which can backtrack catastrophically: " + regex
+            );
+        }
+        try {
+            return Pattern.compile(regex);
+        } catch (PatternSyntaxException e) {
+            throw new IllegalArgumentException("`releaseNamePattern` is not a valid regular expression: " + e.getMessage(), e);
+        }
     }
 
     private static List<PartialObjectMetadata> releaseRecords(KubernetesClient client, boolean allNamespaces, String namespace, String selector) {

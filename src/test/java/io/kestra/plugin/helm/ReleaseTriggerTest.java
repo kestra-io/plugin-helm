@@ -185,7 +185,7 @@ class ReleaseTriggerTest {
         Optional<Execution> byName = evaluate(exact, TestsUtils.mockTrigger(runContextFactory, exact));
         assertThat(releases(byName.orElseThrow()).stream().map(release -> release.get("releaseName")).toList(), containsInAnyOrder("web"));
 
-        ReleaseTrigger pattern = trigger(ns).releaseNamePattern(Property.ofValue("api-.*")).build();
+        ReleaseTrigger pattern = trigger(ns).releaseNamePattern(Property.ofValue("(api)-[a-z]+(-v[0-9]+)?")).build();
         Optional<Execution> byPattern = evaluate(pattern, TestsUtils.mockTrigger(runContextFactory, pattern));
         assertThat(
             releases(byPattern.orElseThrow()).stream().map(release -> release.get("releaseName")).toList(),
@@ -216,6 +216,16 @@ class ReleaseTriggerTest {
             .releaseNamePattern(Property.ofValue("web.*"))
             .build();
         assertThrows(IllegalArgumentException.class, () -> evaluate(names, TestsUtils.mockTrigger(runContextFactory, names)));
+
+        for (String name : List.of("web,environment=prod", "Web", "web-", "a".repeat(54))) {
+            ReleaseTrigger invalid = trigger(ns).releaseName(Property.ofValue(name)).build();
+            assertThrows(IllegalArgumentException.class, () -> evaluate(invalid, TestsUtils.mockTrigger(runContextFactory, invalid)));
+        }
+
+        for (String regex : List.of("(a+)+$", "(\\w*)*", "(a{1,9}b?)+", "[", "a".repeat(257))) {
+            ReleaseTrigger invalid = trigger(ns).releaseNamePattern(Property.ofValue(regex)).build();
+            assertThrows(IllegalArgumentException.class, () -> evaluate(invalid, TestsUtils.mockTrigger(runContextFactory, invalid)));
+        }
 
         ReleaseTrigger connections = trigger(ns)
             .connection(io.kestra.plugin.kubernetes.shared.models.Connection.builder().build())
