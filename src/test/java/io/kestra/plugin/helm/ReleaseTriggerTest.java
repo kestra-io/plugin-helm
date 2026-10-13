@@ -187,7 +187,7 @@ class ReleaseTriggerTest {
         Optional<Execution> byName = evaluate(exact, TestsUtils.mockTrigger(runContextFactory, exact));
         assertThat(releases(byName.orElseThrow()).stream().map(release -> release.get("releaseName")).toList(), containsInAnyOrder("web"));
 
-        ReleaseTrigger pattern = trigger(ns).releaseNamePattern(Property.ofValue("(api)-[a-z]+(-v[0-9]+)?")).build();
+        ReleaseTrigger pattern = trigger(ns).releaseNamePattern(Property.ofValue("(api|svc)-[a-z]+(-v[0-9]+)?")).build();
         Optional<Execution> byPattern = evaluate(pattern, TestsUtils.mockTrigger(runContextFactory, pattern));
         assertThat(
             releases(byPattern.orElseThrow()).stream().map(release -> release.get("releaseName")).toList(),
@@ -224,7 +224,7 @@ class ReleaseTriggerTest {
             assertThrows(IllegalArgumentException.class, () -> evaluate(invalid, TestsUtils.mockTrigger(runContextFactory, invalid)));
         }
 
-        for (String regex : List.of("(a+)+$", "(\\w*)*", "(a{1,9}b?)+", "[", "a".repeat(257))) {
+        for (String regex : List.of("(a+)+$", "(\\w*)*", "(a{1,9}b?)+", "(a|aa)+$", "(a|a)*", "[", "a".repeat(257))) {
             ReleaseTrigger invalid = trigger(ns).releaseNamePattern(Property.ofValue(regex)).build();
             assertThrows(IllegalArgumentException.class, () -> evaluate(invalid, TestsUtils.mockTrigger(runContextFactory, invalid)));
         }

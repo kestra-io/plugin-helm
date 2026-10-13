@@ -161,7 +161,7 @@ public class ReleaseTrigger extends AbstractHelmPollingTrigger implements Trigge
     private static final int MAX_RELEASE_NAME_LENGTH = 53;
     private static final Pattern RELEASE_NAME = Pattern.compile("[a-z0-9]([-a-z0-9.]*[a-z0-9])?");
     private static final int MAX_PATTERN_LENGTH = 256;
-    private static final Pattern NESTED_QUANTIFIER = Pattern.compile("\\((?:[^()\\\\]|\\\\.)*[*+}](?:[^()\\\\]|\\\\.)*\\)[*+{]");
+    private static final Pattern REPEATED_AMBIGUOUS_GROUP = Pattern.compile("\\((?:[^()\\\\]|\\\\.)*[*+}|](?:[^()\\\\]|\\\\.)*\\)[*+{]");
 
     @Schema(
         title = "Kubernetes namespace",
@@ -188,7 +188,7 @@ public class ReleaseTrigger extends AbstractHelmPollingTrigger implements Trigge
 
     @Schema(
         title = "Release name pattern",
-        description = "Watches only releases whose name matches this regular expression in full. Mutually exclusive with `releaseName`. At most 256 characters, and a repeated group must not itself contain a quantifier, such as `(a+)+`, since the pattern runs on every poll."
+        description = "Watches only releases whose name matches this regular expression in full. Mutually exclusive with `releaseName`. At most 256 characters, and a repeated group must not itself contain a quantifier or an alternation, such as `(a+)+` or `(a|aa)+`. This is a best-effort guard against patterns that backtrack catastrophically on every poll, not a guarantee, so keep patterns simple."
     )
     @PluginProperty(group = "main")
     private Property<String> releaseNamePattern;
@@ -363,9 +363,9 @@ public class ReleaseTrigger extends AbstractHelmPollingTrigger implements Trigge
         if (regex.length() > MAX_PATTERN_LENGTH) {
             throw new IllegalArgumentException("`releaseNamePattern` must be at most " + MAX_PATTERN_LENGTH + " characters.");
         }
-        if (NESTED_QUANTIFIER.matcher(regex).find()) {
+        if (REPEATED_AMBIGUOUS_GROUP.matcher(regex).find()) {
             throw new IllegalArgumentException(
-                "`releaseNamePattern` must not repeat a group that itself contains a quantifier, such as `(a+)+`, which can backtrack catastrophically: " + regex
+                "`releaseNamePattern` must not repeat a group that itself contains a quantifier or an alternation, such as `(a+)+` or `(a|aa)+`, which can backtrack catastrophically: " + regex
             );
         }
         try {
