@@ -162,9 +162,11 @@ class ReleaseTriggerTest {
         String ns = namespace();
         apply(ReleaseSecrets.release(ns, "fresh", 1, "pending-install", Instant.now(), true));
         apply(ReleaseSecrets.release(ns, "stuck", 1, "pending-install", Instant.now().minus(Duration.ofHours(1)), true));
+        apply(ReleaseSecrets.release(ns, "upgrading", 1, "superseded", Instant.now().minus(Duration.ofDays(3)), true));
+        apply(ReleaseSecrets.pending(ns, "upgrading", 2, "pending-upgrade", Instant.now(), Instant.now().minus(Duration.ofDays(2))));
 
         ReleaseTrigger trigger = trigger(ns)
-            .statuses(Property.ofValue(List.of(ReleaseStatus.PENDING_INSTALL)))
+            .statuses(Property.ofValue(List.of(ReleaseStatus.PENDING_INSTALL, ReleaseStatus.PENDING_UPGRADE)))
             .stuckFor(Property.ofValue(Duration.ofMinutes(15)))
             .build();
         var context = TestsUtils.mockTrigger(runContextFactory, trigger);

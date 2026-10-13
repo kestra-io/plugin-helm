@@ -65,12 +65,18 @@ class ReleaseStorageServiceTest {
     }
 
     @Test
-    void shouldPreferModifiedAtOverCreatedAt() {
+    void shouldUseTheLaterOfCreatedAtAndModifiedAt() {
         Secret secret = ReleaseSecrets.release("web", "nginx", 1, "deployed", Instant.ofEpochSecond(1_000), true);
         assertThat(ReleaseStorageService.changedAt(secret), is(Instant.ofEpochSecond(1_000)));
 
         secret.getMetadata().getLabels().put("modifiedAt", "2000");
         assertThat(ReleaseStorageService.changedAt(secret), is(Instant.ofEpochSecond(2_000)));
+
+        secret.getMetadata().getLabels().put("modifiedAt", "500");
+        assertThat(ReleaseStorageService.changedAt(secret), is(Instant.ofEpochSecond(1_000)));
+
+        secret.getMetadata().getLabels().remove("createdAt");
+        assertThat(ReleaseStorageService.changedAt(secret), is(Instant.ofEpochSecond(500)));
     }
 
     @Test

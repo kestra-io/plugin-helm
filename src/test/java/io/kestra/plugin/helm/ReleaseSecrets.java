@@ -25,6 +25,12 @@ public final class ReleaseSecrets {
         return withBody(namespace, name, revision, status, createdAt, encode(body(namespace, name, revision, status), gzip));
     }
 
+    public static Secret pending(String namespace, String name, int revision, String status, Instant createdAt, Instant previousModifiedAt) {
+        Secret secret = release(namespace, name, revision, status, createdAt, true);
+        secret.getMetadata().getLabels().put("modifiedAt", String.valueOf(previousModifiedAt.getEpochSecond()));
+        return secret;
+    }
+
     public static Secret withBody(String namespace, String name, int revision, String status, Instant createdAt, String helmEncoded) {
         Map<String, String> labels = new LinkedHashMap<>();
         labels.put("owner", "helm");

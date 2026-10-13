@@ -82,16 +82,12 @@ public final class ReleaseStorageService {
         }
     }
 
-    // A pending revision has no modifiedAt yet, so createdAt is when the stuck operation started.
+    // Helm copies the previous revision's modifiedAt onto a new pending revision, so its createdAt, the later of the two, is when the pending operation started.
     public static Instant changedAt(HasMetadata secret) {
         Instant modified = epochSeconds(label(secret, MODIFIED_AT_LABEL));
-        if (modified != null) {
-            return modified;
-        }
-
         Instant created = epochSeconds(label(secret, CREATED_AT_LABEL));
-        if (created != null) {
-            return created;
+        if (modified != null || created != null) {
+            return modified == null || (created != null && created.isAfter(modified)) ? created : modified;
         }
 
         String timestamp = secret.getMetadata().getCreationTimestamp();
