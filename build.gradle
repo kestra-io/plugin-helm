@@ -51,7 +51,7 @@ dependencies {
     compileOnly group: "io.kestra", name: "script", version: kestraVersion
 
     // Kubernetes auth model, shared with plugin-kubernetes rather than reinvented
-    api "io.kestra.plugin:plugin-kubernetes-lib:1.1.5"
+    api "io.kestra.plugin:plugin-kubernetes-lib:1.2.1"
 }
 
 
@@ -86,7 +86,7 @@ dependencies {
     testImplementation group: "io.kestra", name: "runner-memory", version: kestraVersion
     testImplementation group: "io.kestra", name: "storage-local", version: kestraVersion
 
-    testImplementation "io.kestra.plugin:plugin-kubernetes-lib:1.1.5"
+    testImplementation "io.kestra.plugin:plugin-kubernetes-lib:1.2.1"
     testImplementation "io.fabric8:kubernetes-server-mock:7.9.0"
 
     // test
