@@ -282,7 +282,7 @@ public class Upgrade extends AbstractHelmRelease implements RunnableTask<Upgrade
             outputFiles.add(MANIFEST_FILE);
         }
 
-        ScriptOutput scriptOutput = execute(runContext, commands, outputFiles, null);
+        ScriptOutput scriptOutput = execute(runContext, commands, outputFiles);
 
         Release release = parseRelease(readOutputFile(runContext, scriptOutput, RELEASE_FILE), RELEASE_FILE);
 
@@ -353,6 +353,7 @@ public class Upgrade extends AbstractHelmRelease implements RunnableTask<Upgrade
             .resources(resources)
             .manifest(manifestUri)
             .notes(release.notes())
+            .outputFiles(userOutputFiles(scriptOutput))
             .build();
     }
 

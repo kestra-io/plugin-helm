@@ -22,7 +22,7 @@ Single-module plugin. Source packages under `io.kestra.plugin`:
 - `helm.models` — chart sourcing, release parsing, task outputs, flag and status enums
 - `helm.services` — manifest parsing, kubeconfig rendering, Asset emission, release Secret decoding
 
-`AbstractHelm` holds container execution (task runner, image, env, command assembly). `AbstractHelmRelease` adds the cluster connection, release identity, and Asset emission. `Template` extends `AbstractHelm` directly because it never contacts a cluster and emits no Assets. `AbstractHelmPollingTrigger` repeats the connection fields for triggers, which cannot extend a `Task`, and builds a fabric8 client instead of a kubeconfig file.
+`AbstractHelm` extends `AbstractExecScript` for container execution (task runner, image, env, `beforeCommands`, `failFast`, and `durable` on Kestra 2.1+) and assembles the helm commands. `AbstractHelmRelease` adds the cluster connection, release identity, and Asset emission. `Template` extends `AbstractHelm` directly because it never contacts a cluster and emits no Assets. `AbstractHelmPollingTrigger` repeats the connection fields for triggers, which cannot extend a `Task`, and builds a fabric8 client instead of a kubeconfig file.
 
 Infrastructure dependencies (Docker Compose services):
 
