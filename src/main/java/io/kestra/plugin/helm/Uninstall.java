@@ -184,7 +184,7 @@ public class Uninstall extends AbstractHelmRelease implements RunnableTask<Unins
         commands.add("helm get manifest " + quote(rRelease) + baseFlags + " > " + outputFile(MANIFEST_FILE) + tolerate);
         commands.add("helm uninstall " + quote(rRelease) + uninstallFlags);
 
-        ScriptOutput scriptOutput = execute(runContext, commands, List.of(RELEASE_FILE, MANIFEST_FILE), null);
+        ScriptOutput scriptOutput = execute(runContext, commands, List.of(RELEASE_FILE, MANIFEST_FILE));
 
         String releaseJson = readOutputFile(runContext, scriptOutput, RELEASE_FILE);
 
@@ -196,6 +196,7 @@ public class Uninstall extends AbstractHelmRelease implements RunnableTask<Unins
                 .namespace(rNamespace)
                 .status("not-found")
                 .resources(List.of())
+                .outputFiles(userOutputFiles(scriptOutput))
                 .build();
         }
 
@@ -256,6 +257,7 @@ public class Uninstall extends AbstractHelmRelease implements RunnableTask<Unins
             .resources(resources)
             .manifest(scriptOutput.getOutputFiles().get(MANIFEST_FILE))
             .notes(release.notes())
+            .outputFiles(userOutputFiles(scriptOutput))
             .build();
     }
 

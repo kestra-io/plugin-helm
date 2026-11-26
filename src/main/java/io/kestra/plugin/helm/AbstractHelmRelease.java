@@ -30,7 +30,6 @@ import lombok.experimental.SuperBuilder;
 @Getter
 @NoArgsConstructor
 public abstract class AbstractHelmRelease extends AbstractHelm {
-    private static final String KUBECONFIG_FILE = ".kubeconfig";
 
     @Schema(
         title = "Kubernetes connection",

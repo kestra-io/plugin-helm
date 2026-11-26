@@ -194,7 +194,7 @@ public class Rollback extends AbstractHelmRelease implements RunnableTask<Rollba
         commands.add("helm rollback " + quote(rRelease) + target + rollbackFlags);
 
         if (rDryRun.enabled()) {
-            execute(runContext, commands, List.of(), null);
+            var dryRunOutput = execute(runContext, commands, List.of());
 
             runContext.logger().info(
                 "Dry run ({}) simulated a rollback of release '{}'{}; nothing was applied and no Assets were emitted",
@@ -208,6 +208,7 @@ public class Rollback extends AbstractHelmRelease implements RunnableTask<Rollba
                 .namespace(rNamespace)
                 .revision(rRevision)
                 .resources(List.of())
+                .outputFiles(userOutputFiles(dryRunOutput))
                 .build();
         }
 
@@ -215,7 +216,7 @@ public class Rollback extends AbstractHelmRelease implements RunnableTask<Rollba
         commands.add("helm status " + quote(rRelease) + baseFlags + " --output json > " + outputFile(RELEASE_FILE));
         commands.add("helm get manifest " + quote(rRelease) + baseFlags + " > " + outputFile(MANIFEST_FILE));
 
-        ScriptOutput scriptOutput = execute(runContext, commands, List.of(RELEASE_FILE, MANIFEST_FILE), null);
+        ScriptOutput scriptOutput = execute(runContext, commands, List.of(RELEASE_FILE, MANIFEST_FILE));
 
         Release release = parseRelease(readOutputFile(runContext, scriptOutput, RELEASE_FILE), RELEASE_FILE);
         String manifest = readOutputFile(runContext, scriptOutput, MANIFEST_FILE);
@@ -267,6 +268,7 @@ public class Rollback extends AbstractHelmRelease implements RunnableTask<Rollba
             .resources(resources)
             .manifest(scriptOutput.getOutputFiles().get(MANIFEST_FILE))
             .notes(release.notes())
+            .outputFiles(userOutputFiles(scriptOutput))
             .build();
     }
 

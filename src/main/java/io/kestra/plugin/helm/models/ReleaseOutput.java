@@ -4,6 +4,7 @@ import java.net.URI;
 import java.time.Instant;
 import java.time.OffsetDateTime;
 import java.util.List;
+import java.util.Map;
 
 import io.kestra.core.models.tasks.Output;
 
@@ -73,6 +74,12 @@ public class ReleaseOutput implements Output {
         description = "The chart's rendered `NOTES.txt`."
     )
     private final String notes;
+
+    @Schema(
+        title = "Output files",
+        description = "Files listed in the task's `outputFiles` property, uploaded to Kestra's internal storage."
+    )
+    private final Map<String, URI> outputFiles;
 
     public static Instant instant(String value) {
         if (value == null || value.isBlank()) {

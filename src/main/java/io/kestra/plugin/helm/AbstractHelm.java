@@ -12,14 +12,13 @@ import com.fasterxml.jackson.databind.ObjectMapper;
 
 import io.kestra.core.models.annotations.PluginProperty;
 import io.kestra.core.models.property.Property;
-import io.kestra.core.models.tasks.Task;
 import io.kestra.core.models.tasks.runners.TaskRunner;
 import io.kestra.core.runners.RunContext;
 import io.kestra.core.serializers.JacksonMapper;
 import io.kestra.plugin.helm.models.ChartSource;
 import io.kestra.plugin.helm.models.Release;
+import io.kestra.plugin.scripts.exec.AbstractExecScript;
 import io.kestra.plugin.scripts.exec.scripts.models.ScriptOutput;
-import io.kestra.plugin.scripts.exec.scripts.runners.CommandsWrapper;
 import io.kestra.plugin.scripts.runner.docker.Docker;
 
 import io.swagger.v3.oas.annotations.media.Schema;
@@ -32,16 +31,18 @@ import lombok.ToString;
 import lombok.experimental.SuperBuilder;
 
 @SuperBuilder
-@ToString
+// callSuper = false keeps the inherited env out of toString, it can hold registry credentials
+@ToString(callSuper = false)
 @EqualsAndHashCode
 @Getter
 @NoArgsConstructor
-public abstract class AbstractHelm extends Task {
+public abstract class AbstractHelm extends AbstractExecScript {
     private static final String DEFAULT_IMAGE = "alpine/helm:4.3.0";
 
     protected static final String RELEASE_FILE = "release.json";
     protected static final String MANIFEST_FILE = "manifest.yaml";
     protected static final String INLINE_VALUES_FILE = ".kestra-values.yaml";
+    protected static final String KUBECONFIG_FILE = ".kubeconfig";
 
     protected static final ObjectMapper JSON = JacksonMapper.ofJson();
 
@@ -65,36 +66,24 @@ public abstract class AbstractHelm extends Task {
     @PluginProperty(group = "execution")
     protected Property<String> containerImage = Property.ofValue(DEFAULT_IMAGE);
 
-    @Schema(
-        title = "Additional environment variables",
-        description = "Extra environment variables injected into the Helm container, for registry credentials or proxy settings."
-    )
-    @PluginProperty(group = "execution")
-    protected Property<Map<String, String>> env;
+    protected ScriptOutput execute(RunContext runContext, List<String> commands, List<String> outputFiles) throws Exception {
+        var rOutputFiles = new ArrayList<>(runContext.render(this.getOutputFiles()).asList(String.class));
+        rOutputFiles.addAll(outputFiles);
 
-    protected ScriptOutput execute(
-        RunContext runContext,
-        List<String> commands,
-        List<String> outputFiles,
-        Map<String, String> extraEnv
-    ) throws Exception {
-        Map<String, String> environment = new HashMap<>(
-            runContext.render(this.env).asMap(String.class, String.class)
-        );
-        if (extraEnv != null) {
-            environment.putAll(extraEnv);
-        }
-
-        return new CommandsWrapper(runContext)
-            .withTaskRunner(this.taskRunner)
-            .withContainerImage(runContext.render(this.containerImage).as(String.class).orElse(DEFAULT_IMAGE))
-            .withEnv(environment)
-            .withInterpreter(Property.ofValue(List.of("/bin/sh", "-c")))
-            .withCommands(Property.ofValue(commands))
-            .withOutputFiles(outputFiles)
-            .withFailFast(true)
+        return this.commands(runContext)
+            .withInterpreter(this.getInterpreter())
+            .withBeforeCommands(this.getBeforeCommands())
             .withBeforeCommandsWithOptions(true)
+            .withCommands(Property.ofValue(commands))
+            .withOutputFiles(rOutputFiles)
             .run();
+    }
+
+    // Helm's files are in the other outputs, and a glob must not expose the kubeconfig or inline values
+    protected Map<String, URI> userOutputFiles(ScriptOutput output) {
+        var files = new HashMap<>(output.getOutputFiles());
+        files.keySet().removeAll(List.of(RELEASE_FILE, MANIFEST_FILE, KUBECONFIG_FILE, INLINE_VALUES_FILE));
+        return files;
     }
 
     protected String readOutputFile(RunContext runContext, ScriptOutput output, String name) throws Exception {

@@ -145,7 +145,7 @@ public class Template extends AbstractHelm implements RunnableTask<Template.Outp
                 + " > " + outputFile(MANIFEST_FILE)
         );
 
-        ScriptOutput scriptOutput = execute(runContext, commands, List.of(MANIFEST_FILE), null);
+        ScriptOutput scriptOutput = execute(runContext, commands, List.of(MANIFEST_FILE));
 
         String manifest = readOutputFile(runContext, scriptOutput, MANIFEST_FILE);
         List<ReleaseResource> resources = ManifestService.parse(
@@ -160,6 +160,7 @@ public class Template extends AbstractHelm implements RunnableTask<Template.Outp
             .manifest(scriptOutput.getOutputFiles().get(MANIFEST_FILE))
             .resources(resources)
             .chartReference(chartArgs.reference())
+            .outputFiles(userOutputFiles(scriptOutput))
             .build();
     }
 
@@ -183,5 +184,11 @@ public class Template extends AbstractHelm implements RunnableTask<Template.Outp
             description = "Resolved reference of the rendered chart, e.g. `https://charts.bitnami.com/bitnami/nginx:15.4.2`."
         )
         private final String chartReference;
+
+        @Schema(
+            title = "Output files",
+            description = "Files listed in the task's `outputFiles` property, uploaded to Kestra's internal storage."
+        )
+        private final Map<String, URI> outputFiles;
     }
 }

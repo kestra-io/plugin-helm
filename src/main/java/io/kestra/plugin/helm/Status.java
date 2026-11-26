@@ -99,7 +99,7 @@ public class Status extends AbstractHelmRelease implements RunnableTask<Status.O
             "helm get manifest " + quote(rRelease) + flags + " > " + outputFile(MANIFEST_FILE)
         );
 
-        ScriptOutput scriptOutput = execute(runContext, commands, List.of(RELEASE_FILE, MANIFEST_FILE), null);
+        ScriptOutput scriptOutput = execute(runContext, commands, List.of(RELEASE_FILE, MANIFEST_FILE));
 
         Release release = parseRelease(readOutputFile(runContext, scriptOutput, RELEASE_FILE), RELEASE_FILE);
         String manifest = readOutputFile(runContext, scriptOutput, MANIFEST_FILE);
@@ -151,6 +151,7 @@ public class Status extends AbstractHelmRelease implements RunnableTask<Status.O
             .resources(resources)
             .manifest(scriptOutput.getOutputFiles().get(MANIFEST_FILE))
             .notes(release.notes())
+            .outputFiles(userOutputFiles(scriptOutput))
             .build();
     }
 
